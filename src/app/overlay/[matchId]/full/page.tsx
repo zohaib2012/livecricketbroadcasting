@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getSocket } from '@/lib/socket';
+import { getMatchChannel, unsubscribeMatch } from '@/lib/socket';
 
 const THEMES = {
   default: {
@@ -111,23 +111,18 @@ export default function FullOverlay({ params }: { params: { matchId: string } })
       .then(setData)
       .catch(() => {});
 
-    const socket = getSocket();
-    socket.emit('join_match', { matchId: params.matchId });
-    socket.on('score_updated', setData);
-
-    displayHandlerRef.current = ({ mode }: { mode: string }) => setDisplayMode(mode);
-    animateHandlerRef.current = ({ type }: { type: string }) => {
+    const channel = getMatchChannel(params.matchId);
+    channel.bind('score_updated', setData);
+    channel.bind('overlay_display', ({ mode }: { mode: string }) => setDisplayMode(mode));
+    channel.bind('overlay_animate', ({ type }: { type: string }) => {
       setAnimation(type || null);
       if (type) setTimeout(() => setAnimation(null), 3000);
-    };
-
-    socket.on('overlay_display', displayHandlerRef.current);
-    socket.on('overlay_animate', animateHandlerRef.current);
+    });
 
     return () => {
-      socket.off('score_updated', setData);
-      if (displayHandlerRef.current) socket.off('overlay_display', displayHandlerRef.current);
-      if (animateHandlerRef.current) socket.off('overlay_animate', animateHandlerRef.current);
+      channel.unbind('score_updated', setData);
+      channel.unbind_all();
+      unsubscribeMatch(params.matchId);
     };
   }, [params.matchId]);
 

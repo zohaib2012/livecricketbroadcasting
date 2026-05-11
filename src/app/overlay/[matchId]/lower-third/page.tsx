@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getSocket } from '@/lib/socket';
+import { getMatchChannel, unsubscribeMatch } from '@/lib/socket';
 
 export default function LowerThirdOverlay({ params }: { params: { matchId: string } }) {
   const [data, setData] = useState<any>(null);
@@ -11,11 +11,13 @@ export default function LowerThirdOverlay({ params }: { params: { matchId: strin
       .then(setData)
       .catch(() => {});
 
-    const socket = getSocket();
-    socket.emit('join_match', { matchId: params.matchId });
-    socket.on('score_updated', setData);
+    const channel = getMatchChannel(params.matchId);
+    channel.bind('score_updated', setData);
 
-    return () => { socket.off('score_updated', setData); };
+    return () => {
+      channel.unbind_all();
+      unsubscribeMatch(params.matchId);
+    };
   }, [params.matchId]);
 
   if (!data || !data.currentInnings) return null;

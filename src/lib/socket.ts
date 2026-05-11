@@ -1,102 +1,66 @@
-import { io, Socket } from 'socket.io-client';
-import { SocketEvents } from '@/types/cricket';
+import Pusher, { Channel } from 'pusher-js';
 
-let socket: Socket | null = null;
+let pusherClient: Pusher | null = null;
+const channels = new Map<string, Channel>();
 
-function getSocketUrl(): string {
-  if (typeof window !== 'undefined') {
-    return window.location.origin;
-  }
-  return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
-}
-
-export function getSocket(): Socket {
-  if (!socket) {
-    socket = io(getSocketUrl(), {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
+export function getPusherClient(): Pusher {
+  if (!pusherClient && typeof window !== 'undefined') {
+    pusherClient = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
     });
   }
-  return socket;
+  return pusherClient!;
 }
 
-export function disconnectSocket(): void {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
+export function getMatchChannel(matchId: string): Channel {
+  const client = getPusherClient();
+  const name = `match-${matchId}`;
+  if (!channels.has(name)) {
+    channels.set(name, client.subscribe(name));
+  }
+  return channels.get(name)!;
+}
+
+export function unsubscribeMatch(matchId: string): void {
+  const name = `match-${matchId}`;
+  if (pusherClient && channels.has(name)) {
+    pusherClient.unsubscribe(name);
+    channels.delete(name);
   }
 }
 
-export function joinMatchRoom(matchId: string): void {
-  const socket = getSocket();
-  socket.emit('join_match', { matchId });
+export async function emitOverlayDisplay(matchId: string, mode: string): Promise<void> {
+  await fetch('/api/overlay/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ matchId, event: 'overlay_display', data: { mode } }),
+  });
 }
 
-export function leaveMatchRoom(matchId: string): void {
-  const socket = getSocket();
-  socket.emit('leave_match', { matchId });
+export async function emitOverlayAnimate(matchId: string, type: string): Promise<void> {
+  await fetch('/api/overlay/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ matchId, event: 'overlay_animate', data: { type } }),
+  });
 }
 
-export function onScoreUpdate(callback: (data: SocketEvents['score_updated']) => void): void {
-  const socket = getSocket();
-  socket.on('score_updated', callback);
+export async function emitOverlayDecision(matchId: string, decision: string): Promise<void> {
+  await fetch('/api/overlay/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ matchId, event: 'overlay_decision', data: { decision } }),
+  });
 }
 
-export function onWicketFell(callback: (data: SocketEvents['wicket_fell']) => void): void {
-  const socket = getSocket();
-  socket.on('wicket_fell', callback);
+// Legacy helpers used in compact overlay
+export function onOverlayDisplay(cb: (data: { mode: string }) => void) {
+  // subscribed per-page via getMatchChannel
 }
+export function onOverlayAnimate(cb: (data: { type: string }) => void) {}
+export function offOverlayDisplay(cb: (data: { mode: string }) => void) {}
+export function offOverlayAnimate(cb: (data: { type: string }) => void) {}
 
-export function onInningsComplete(callback: (data: SocketEvents['innings_complete']) => void): void {
-  const socket = getSocket();
-  socket.on('innings_complete', callback);
-}
-
-export function onMatchComplete(callback: (data: SocketEvents['match_complete']) => void): void {
-  const socket = getSocket();
-  socket.on('match_complete', callback);
-}
-
-export function onMatchStatus(callback: (data: SocketEvents['match_status']) => void): void {
-  const socket = getSocket();
-  socket.on('match_status', callback);
-}
-
-export function offScoreUpdate(callback: (data: SocketEvents['score_updated']) => void): void {
-  const socket = getSocket();
-  socket.off('score_updated', callback);
-}
-
-export function emitOverlayDisplay(matchId: string, mode: string): void {
-  getSocket().emit('overlay_set_display', { matchId, mode });
-}
-
-export function emitOverlayAnimate(matchId: string, type: string): void {
-  getSocket().emit('overlay_trigger_animate', { matchId, type });
-}
-
-export function emitOverlayDecision(matchId: string, decision: string): void {
-  getSocket().emit('overlay_set_decision', { matchId, decision });
-}
-
-export function onOverlayDisplay(callback: (data: { mode: string }) => void): void {
-  getSocket().on('overlay_display', callback);
-}
-
-export function onOverlayAnimate(callback: (data: { type: string }) => void): void {
-  getSocket().on('overlay_animate', callback);
-}
-
-export function onOverlayDecision(callback: (data: { decision: string }) => void): void {
-  getSocket().on('overlay_decision', callback);
-}
-
-export function offOverlayDisplay(callback: (data: { mode: string }) => void): void {
-  getSocket().off('overlay_display', callback);
-}
-
-export function offOverlayAnimate(callback: (data: { type: string }) => void): void {
-  getSocket().off('overlay_animate', callback);
-}
+// Kept for any remaining imports — no-op on Pusher
+export function getSocket() { return null as any; }
+export function disconnectSocket() { if (pusherClient) { pusherClient.disconnect(); pusherClient = null; } }

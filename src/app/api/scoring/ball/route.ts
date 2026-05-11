@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { calculateBallOutcome, formatOvers, calculateStrikeRate, calculateEconomy } from '@/lib/scoring-engine';
+import { triggerMatchEvent } from '@/lib/pusher-server';
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -176,16 +177,13 @@ export async function POST(request: Request) {
   
   const liveData = await buildLiveScoreData(matchId, inningsId);
 
-  const io = (global as any).__socketio;
-  if (io) {
-    io.to(`match_${matchId}`).emit('score_updated', liveData);
-    if (ball.runs === 4) {
-      io.to(`match_${matchId}`).emit('overlay_animate', { type: 'FOUR' });
-    } else if (ball.runs === 6) {
-      io.to(`match_${matchId}`).emit('overlay_animate', { type: 'SIX' });
-    } else if (ball.isWicket) {
-      io.to(`match_${matchId}`).emit('overlay_animate', { type: 'WICKET' });
-    }
+  await triggerMatchEvent(matchId, 'score_updated', liveData);
+  if (ball.runs === 4) {
+    await triggerMatchEvent(matchId, 'overlay_animate', { type: 'FOUR' });
+  } else if (ball.runs === 6) {
+    await triggerMatchEvent(matchId, 'overlay_animate', { type: 'SIX' });
+  } else if (ball.isWicket) {
+    await triggerMatchEvent(matchId, 'overlay_animate', { type: 'WICKET' });
   }
   
   return NextResponse.json({ ball, innings: updatedInnings, liveData });

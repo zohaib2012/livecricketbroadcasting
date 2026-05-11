@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getSocket, onOverlayDisplay, onOverlayAnimate, offOverlayDisplay, offOverlayAnimate } from '@/lib/socket';
+import { getMatchChannel, unsubscribeMatch } from '@/lib/socket';
 
 export default function CompactOverlay({ params }: { params: { matchId: string } }) {
   const [data, setData] = useState<any>(null);
@@ -13,20 +13,17 @@ export default function CompactOverlay({ params }: { params: { matchId: string }
       .then(setData)
       .catch(() => {});
 
-    const socket = getSocket();
-    socket.emit('join_match', { matchId: params.matchId });
-    socket.on('score_updated', setData);
-
-    onOverlayDisplay(({ mode }) => setDisplayMode(mode));
-    onOverlayAnimate(({ type }) => {
+    const channel = getMatchChannel(params.matchId);
+    channel.bind('score_updated', setData);
+    channel.bind('overlay_display', ({ mode }: { mode: string }) => setDisplayMode(mode));
+    channel.bind('overlay_animate', ({ type }: { type: string }) => {
       setAnimation(type);
       setTimeout(() => setAnimation(null), 3000);
     });
 
     return () => {
-      socket.off('score_updated', setData);
-      offOverlayDisplay(({ mode }) => setDisplayMode(mode));
-      offOverlayAnimate(({ type }) => setAnimation(type));
+      channel.unbind_all();
+      unsubscribeMatch(params.matchId);
     };
   }, [params.matchId]);
 

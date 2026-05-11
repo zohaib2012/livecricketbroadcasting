@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Undo2, RotateCcw, Settings, Users } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ArrowLeft, Undo2, Users } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +21,6 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
   const [wicketType, setWicketType] = useState('');
   const [showBowlerSelect, setShowBowlerSelect] = useState(false);
   const [showStrikerSelect, setShowStrikerSelect] = useState(false);
-  const [lastBallResult, setLastBallResult] = useState<any>(null);
   const [activeDisplay, setActiveDisplay] = useState('DEFAULT');
 
   useEffect(() => {
@@ -40,7 +39,7 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
 
       if (live.currentInnings) {
         setCurrentInnings(live.currentInnings);
-        const notOutBatsmen = live.currentInnings.battingScorecards || [];
+        const notOutBatsmen = live.currentInnings.battingScorecards?.filter((bs: any) => !bs.howOut) || [];
         if (notOutBatsmen.length >= 1) setStrikerId(notOutBatsmen[0].playerId);
         if (notOutBatsmen.length >= 2) setNonStrikerId(notOutBatsmen[1].playerId);
         const currentBowler = live.currentInnings.bowlingScorecards?.[0];
@@ -52,22 +51,13 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
     }
   };
 
+
   const getBowlerName = () => {
     const bowlingTeam = matchData?.team1?.id === currentInnings?.bowlingTeamId
       ? matchData?.team1
       : matchData?.team2;
     const allPlayers = bowlingTeam?.teamPlayers?.map((tp: any) => tp.player) || [];
     return allPlayers.find((p: any) => p.id === bowlerId)?.name || 'Select Bowler';
-  };
-
-  const getStrikerName = () => {
-    const allPlayers = currentInnings?.battingScorecards?.map((bs: any) => bs.player) || [];
-    return allPlayers.find((p: any) => p.id === strikerId)?.name || 'Select Striker';
-  };
-
-  const getNonStrikerName = () => {
-    const allPlayers = currentInnings?.battingScorecards?.map((bs: any) => bs.player) || [];
-    return allPlayers.find((p: any) => p.id === nonStrikerId)?.name || 'Select Non-Striker';
   };
 
   const scoreBall = async (runs: number, extras: string | null = null, isWicket: boolean = false, wType?: string) => {
@@ -95,19 +85,36 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
       });
       if (!res.ok) { const d = await res.json(); setError(d.error); return; }
       const data = await res.json();
-      setLastBallResult(data.ball);
 
-      if (runs === 1 || runs === 3) {
+      // Update innings immediately from response - no extra DB round-trip
+      if (data.liveData?.currentInnings) {
+        setCurrentInnings(data.liveData.currentInnings);
+      }
+
+      // Swap striker/non-striker on odd runs
+      if (!extras && (runs === 1 || runs === 3)) {
         const temp = strikerId;
         setStrikerId(nonStrikerId);
         setNonStrikerId(temp);
       }
 
-      setThisOver(prev => [...prev, data.ball]);
-      await loadData();
-    } catch (e) {
+      // Reset over display after 6 legal balls
+      setThisOver(prev => {
+        const legalCount = prev.filter((b: any) => !b.isWide && !b.isNoBall).length;
+        if (legalCount >= 6) return [data.ball];
+        return [...prev, data.ball];
+      });
+
+      // Show striker select after wicket so scorer picks next batsman
+      if (isWicket) setShowStrikerSelect(true);
+
+      // Background sync - does NOT block buttons
+      loadData();
+    } catch {
       setError('Failed to score ball');
-    } finally { setSubmitting(false); }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const undoBall = async () => {
@@ -118,7 +125,7 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
         body: JSON.stringify({ inningsId: currentInnings.id }),
       });
       setThisOver(prev => prev.slice(0, -1));
-      await loadData();
+      loadData(); // background - no await
     } catch { setError('Failed to undo'); }
   };
 
@@ -165,6 +172,7 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
 
   const bowlingTeamPlayers = bowlingTeam?.teamPlayers?.map((tp: any) => tp.player) || [];
   const battingTeamPlayers = battingTeam?.teamPlayers?.map((tp: any) => tp.player) || [];
+  const notOutBatsmen = currentInnings?.battingScorecards?.filter((bs: any) => !bs.howOut) || [];
 
   if (loading) return <div className="p-8 text-center text-muted-foreground">Loading match data...</div>;
   if (!matchData) return <div className="p-8 text-center text-red-400">Match not found</div>;
@@ -360,12 +368,15 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={undoBall} disabled={submitting}>
               <Undo2 className="w-4 h-4 mr-2" />Undo
             </Button>
             <Button variant="outline" onClick={() => setShowBowlerSelect(true)} disabled={submitting}>
               <Users className="w-4 h-4 mr-2" />Change Bowler
+            </Button>
+            <Button variant="outline" onClick={() => setShowStrikerSelect(true)} disabled={submitting}>
+              <Users className="w-4 h-4 mr-2" />Change Striker
             </Button>
           </div>
           <div className="flex items-center gap-2">
@@ -407,6 +418,25 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
               ))}
             </div>
             <Button variant="ghost" className="w-full mt-4" onClick={() => setShowBowlerSelect(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {showStrikerSelect && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="premium-card p-6 w-full max-w-md mx-4">
+            <h3 className="text-xl font-bold mb-2">New Batsman</h3>
+            <p className="text-muted-foreground text-sm mb-4">Wicket giri — agle batsman ko select karo</p>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {battingTeamPlayers
+                .filter((p: any) => p.id !== nonStrikerId && !notOutBatsmen.find((bs: any) => bs.playerId === p.id && !bs.howOut))
+                .map((p: any) => (
+                  <Button key={p.id} variant="outline" className="w-full justify-start" onClick={() => { setStrikerId(p.id); setShowStrikerSelect(false); }}>
+                    {p.name} - {p.role}
+                  </Button>
+                ))}
+            </div>
+            <Button variant="ghost" className="w-full mt-4" onClick={() => setShowStrikerSelect(false)}>Cancel</Button>
           </div>
         </div>
       )}
