@@ -29,8 +29,20 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
   const [addBowlingNames, setAddBowlingNames] = useState('');
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [showPlayerSection, setShowPlayerSection] = useState(false);
+  const [showCustomRunsDialog, setShowCustomRunsDialog] = useState(false);
+  const [customRunsInput, setCustomRunsInput] = useState('');
+  const [showEditShortName, setShowEditShortName] = useState(false);
+  const [team1Short, setTeam1Short] = useState('');
+  const [team2Short, setTeam2Short] = useState('');
 
   useEffect(() => { loadData(); }, [params.matchId]);
+
+  useEffect(() => {
+    if (matchData && !team1Short) {
+      setTeam1Short(matchData.team1?.name?.split(' ').map((w: string) => w[0]).join('').slice(0, 5) || '');
+      setTeam2Short(matchData.team2?.name?.split(' ').map((w: string) => w[0]).join('').slice(0, 5) || '');
+    }
+  }, [matchData]);
 
   const loadData = async () => {
     try {
@@ -208,6 +220,33 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
     setAddingPlayer(false);
   };
 
+  const saveShortNames = async () => {
+    await fetch('/api/overlay/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        matchId: params.matchId,
+        event: 'overlay_team_names',
+        data: { team1Short, team2Short },
+      }),
+    });
+    setShowEditShortName(false);
+  };
+
+  const scoreCustomRuns = () => {
+    const n = parseInt(customRunsInput);
+    if (!isNaN(n) && n >= 0) {
+      scoreBall(n);
+      setShowCustomRunsDialog(false);
+      setCustomRunsInput('');
+    }
+  };
+
+  const scoreDeadBall = () => {
+    // Dead ball — marks in over display but does NOT count as a delivery
+    setThisOver(prev => [...prev, { runs: 0, isDeadBall: true }]);
+  };
+
   const bowlingTeam = matchData?.team1?.id === currentInnings?.bowlingTeamId ? matchData?.team1 : matchData?.team2;
   const battingTeam = matchData?.team1?.id === currentInnings?.battingTeamId ? matchData?.team1 : matchData?.team2;
   const bowlingTeamPlayers = bowlingTeam?.teamPlayers?.map((tp: any) => tp.player) || [];
@@ -286,17 +325,24 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
           </div>
 
           {/* Over balls */}
-          <div className="flex gap-2 mb-3">
-            {Array.from({ length: 6 }).map((_, i) => (
+          <div className="flex gap-2 mb-3 flex-wrap">
+            {Array.from({ length: Math.max(6, thisOver.length) }).map((_, i) => (
               <div key={i} className={cn('w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold transition-all',
                 thisOver[i]
-                  ? thisOver[i].isWicket ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                  ? thisOver[i].isDeadBall ? 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                  : thisOver[i].isWicket ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                   : thisOver[i].runs === 6 ? 'bg-green-500/20 text-green-400 border border-green-500/30'
                   : thisOver[i].runs === 4 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                   : 'bg-secondary text-foreground'
                   : 'bg-secondary/30 border border-dashed border-border'
               )}>
-                {thisOver[i] ? thisOver[i].isWicket ? 'W' : thisOver[i].isWide ? `${thisOver[i].runs + 1}wd` : thisOver[i].runs.toString() : '·'}
+                {thisOver[i]
+                  ? thisOver[i].isDeadBall ? 'D'
+                  : thisOver[i].isWicket ? 'W'
+                  : thisOver[i].isWide ? `${thisOver[i].runs + 1}wd`
+                  : thisOver[i].isNoBall ? `${thisOver[i].runs}nb`
+                  : thisOver[i].runs.toString()
+                  : '·'}
               </div>
             ))}
           </div>
@@ -365,6 +411,12 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
               <UserPlus className="w-3 h-3 mr-1" />ADD PLAYER
             </Button>
           </div>
+          <div className="mt-2">
+            <Button size="sm" variant="outline" className="w-full border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+              onClick={() => setShowEditShortName(true)}>
+              ✏️ Edit Team Short Name
+            </Button>
+          </div>
         </div>
 
         {/* Extras checkboxes style + Run Buttons */}
@@ -389,6 +441,14 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
               className="text-2xl font-black h-14 bg-green-500/10 border-green-500/30 text-green-400">6</Button>
             <Button variant="outline" size="lg" onClick={() => setShowWicketDialog(true)} disabled={submitting}
               className="text-2xl font-black h-14 bg-red-500/10 border-red-500/30 text-red-400">W</Button>
+            {/* Custom / extra runs */}
+            <Button variant="outline" size="lg" onClick={() => setShowCustomRunsDialog(true)} disabled={submitting}
+              className="text-2xl font-black h-14 col-span-2">···</Button>
+            <Button variant="outline" size="lg" onClick={scoreDeadBall} disabled={submitting}
+              className="text-lg font-black h-14 bg-gray-500/10 border-gray-500/30 text-gray-400">1D</Button>
+            <Button variant="outline" size="lg"
+              onClick={() => alert('Run buttons:\n0-6 = runs scored\nW = wicket\n··· = custom/overthrow runs\n1D = dead ball (not counted in over)\nWide/NoBall/Byes/LegByes = extras')}
+              className="text-2xl font-black h-14">?</Button>
           </div>
         </div>
 
@@ -585,6 +645,70 @@ export default function ScoringPage({ params }: { params: { matchId: string } })
               ))}
             </div>
             <Button variant="ghost" className="w-full mt-3" onClick={() => setShowBowlerSelect(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Runs Dialog */}
+      {showCustomRunsDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="premium-card p-6 w-full max-w-xs mx-4">
+            <h3 className="text-xl font-bold mb-2">Custom Runs</h3>
+            <p className="text-muted-foreground text-xs mb-4">Enter runs (overthrows, penalties, 7+)</p>
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {[7, 8, 9, 10, 5, 3, 2, 1].map(n => (
+                <Button key={n} variant="outline" className="font-bold text-lg h-12"
+                  onClick={() => { setCustomRunsInput(String(n)); }}>
+                  {n}
+                </Button>
+              ))}
+            </div>
+            <input
+              type="number"
+              min="0"
+              value={customRunsInput}
+              onChange={e => setCustomRunsInput(e.target.value)}
+              placeholder="Enter any value"
+              className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-center text-xl font-bold mb-3"
+            />
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={() => { setShowCustomRunsDialog(false); setCustomRunsInput(''); }}>Cancel</Button>
+              <Button className="flex-1" onClick={scoreCustomRuns} disabled={!customRunsInput || submitting}>Score {customRunsInput || '?'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Team Short Name Dialog */}
+      {showEditShortName && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="premium-card p-6 w-full max-w-sm mx-4">
+            <h3 className="text-xl font-bold mb-1">Edit Team Short Name</h3>
+            <p className="text-muted-foreground text-xs mb-4">Short names shown on overlay scoreboard</p>
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="text-sm text-muted-foreground mb-1 block">{matchData?.team1?.name}</label>
+                <input
+                  value={team1Short}
+                  onChange={e => setTeam1Short(e.target.value.toUpperCase().slice(0, 6))}
+                  placeholder="e.g. MI"
+                  className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-sm font-bold uppercase"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground mb-1 block">{matchData?.team2?.name}</label>
+                <input
+                  value={team2Short}
+                  onChange={e => setTeam2Short(e.target.value.toUpperCase().slice(0, 6))}
+                  placeholder="e.g. CSK"
+                  className="w-full px-3 py-2 rounded-lg bg-secondary/50 border border-border text-sm font-bold uppercase"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={() => setShowEditShortName(false)}>Cancel</Button>
+              <Button className="flex-1" onClick={saveShortNames}>Save & Broadcast</Button>
+            </div>
           </div>
         </div>
       )}
